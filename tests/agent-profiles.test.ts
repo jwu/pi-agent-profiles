@@ -9,6 +9,7 @@ import {
   loadAgentFromPath,
   parseAgentProfile,
   selectAgentModel,
+  selectAgentTools,
   selectAgentSkills,
 } from '../src/index.js';
 
@@ -121,6 +122,43 @@ test('rejects the old model field even when models is also configured', () => {
   expect(() =>
     parseAgentProfile(markdown('name: reviewer\nmodel:\nmodels: new/model'), 'review.md'),
   ).toThrow('Please use `models` instead.');
+});
+
+test('selects exact and wildcard tools, reporting entries with no matches', () => {
+  const available = ['read', 'write', 'hc_run', 'hc_send'];
+  expect(selectAgentTools(['read', 'hc_*', 'read', 'missing*'], available, ['write'])).toEqual({
+    selected: ['read', 'hc_run', 'hc_send'],
+    missing: ['missing*'],
+  });
+  expect(selectAgentTools(['missing*'], available, ['write'])).toEqual({
+    selected: [],
+    missing: ['missing*'],
+  });
+});
+
+test('modifies the active tools in order and leaves an omitted list unchanged', () => {
+  const available = ['read', 'write', 'grep'];
+  expect(
+    selectAgentTools(['+grep', '-write', '-grep', '+grep', '+missing'], available, [
+      'read',
+      'write',
+    ]),
+  ).toEqual({
+    selected: ['read', 'grep'],
+    missing: ['+missing'],
+  });
+  expect(selectAgentTools([], available, ['read', 'write'])).toEqual({
+    selected: ['read', 'write'],
+    missing: [],
+  });
+});
+
+test('rejects invalid tools syntax when loading a profile', () => {
+  const parse = (tools: string) =>
+    parseAgentProfile(markdown(`name: reviewer\ntools: ${tools}`), 'review.md');
+  expect(parse('+grep, -write').tools).toEqual(['+grep', '-write']);
+  expect(() => parse('read, -write')).toThrow('cannot be mixed');
+  expect(() => parse('+hc_*')).toThrow('entries take exact tool names');
 });
 
 test('loads directories with project overrides and reports invalid definitions', async () => {

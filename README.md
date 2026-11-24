@@ -4,25 +4,89 @@
 
 ## Agent definitions
 
-Name lookup uses the user's `~/.pi/agent/agents/` directory and the selected workspace's `.pi/agents/` directory. The project takes precedence by frontmatter `name`. Within one directory, the first file in filename order wins. Invalid files are reported with their paths.
+`loadAgentDefinitions()` scans `~/.pi/agent/agents/*.md` and `<cwd>/.pi/agents/*.md`. A project definition overrides a global definition with the same `name`. Within one directory, the first valid definition in filename order wins. Invalid definitions are skipped and returned as warnings with their file paths. `PI_CODING_AGENT_DIR` changes the base directory for global definitions.
 
 ```markdown
 ---
 name: reviewer
-description: Reviews code changes.
-tools: read, grep, find, ls
-skills: review-*, tdd
+description: "Reviews changes for correctness and test coverage."
 models: anthropic/claude-sonnet-4-6, magpie/claude/*, deep-*
-systemPrompt: replace
 thinking: high
+tools: read, grep, find, ls, subagent
+skills: review-*, tdd
+allowedAgents: scout, test-writer
+maxDepth: 2
+systemPrompt: replace
+debug: false
 ---
 
 Review the changes. Report actionable findings with file and line references.
+
+<pi-subagents-runtime-tools />
 ```
 
-The scalar frontmatter format also accepts `allowedAgents`, `maxDepth`, and `debug`. Only `name` is required. `thinking` defaults to `off`, `maxDepth` to `10`, and `systemPrompt` to `append`.
+Start the file with a `---` block containing one `key: value` entry per line. The parser trims surrounding whitespace and strips quotes from the edges of a value. Blank lines and full-line `#` comments are ignored inside the block. Write lists as comma-separated values on one line (for example, `tools: read, grep`). The parser trims each item and skips empty items. Inline comments, YAML sequences, and multiline values have no special syntax. Field names are case-sensitive. The Markdown after the closing `---` is the agent prompt.
 
-Use the comma-separated `models` field to allow model IDs and `*` patterns. A pattern such as `magpie/claude/*` matches a provider-qualified ID. A pattern such as `deep-*` can match the model ID alone. An omitted or empty list allows any model. Rename an existing `model` field to `models`. The loader warns and skips any profile that still contains `model`.
+## Field reference
+
+| Field | Default | Syntax and behavior |
+| --- | --- | --- |
+| `name` | Required | Non-empty string used to look up the profile. It can differ from the filename. |
+| `description` | Omitted | Optional single-line summary for callers that display profile information. The Markdown body supplies the prompt. |
+| `models` | Any model allowed | Comma-separated model IDs, provider-qualified IDs, or `*` patterns. See [Model selection](#model-selection). |
+| `thinking` | `off` | One of `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. The launcher requests this reasoning level for the session. Pi may clamp it to the selected model's capabilities. |
+| `tools` | Entry point's existing tool selection | Comma-separated tool names and `*` patterns, or a list of `+name` and `-name` entries. See [Tool selection](#tool-selection). |
+| `skills` | No skills in the profile prompt | Comma-separated skill names or `*` patterns such as `review-*`. Matches the skill's declared `name` against the entry point's discovered skills. |
+| `allowedAgents` | No additional name restriction | Comma-separated exact profile names for delegation, such as `scout, test-writer`. See [Delegation](#delegation). |
+| `maxDepth` | `10` | Non-negative safe integer for the depth of delegated sessions. See [Delegation](#delegation). |
+| `systemPrompt` | `append` | One of `append`, `replace`, or `replace-all`. See [Prompt composition](#prompt-composition). |
+| `debug` | `false` | `true` or `false` in lowercase. With `true`, the launchers write `debug-system-prompt.md` in the session working directory when a turn starts, overwriting the previous copy. |
+
+### Model selection
+
+- `models: anthropic/claude-sonnet-4-6, magpie/claude/*, deep-*` allows three kinds of entries. A provider-qualified entry matches the full selection. An unqualified entry such as `deep-*` also matches the model ID portion of a qualified selection.
+- `subagent` and `hc_run` accept an optional `model` argument. A selection outside a configured list fails before launch. Leave it out to use the first `models` entry. If that entry is a pattern, the launcher takes the first matching model in Pi's available catalog. A pattern with no available match produces an error even if later entries could match.
+- `pi --agent` applies the first entry to the current session. If model selection or activation fails, it warns and keeps the current model.
+- An omitted or empty `models` list allows any caller selection. With no explicit selection, Pi keeps its normal model selection. Rename old `model:` fields to `models:`. A profile that still contains `model:` is rejected with a migration message.
+
+### Tool selection
+
+| Example | Behavior |
+| --- | --- |
+| `tools: read, hc_*` | Select tools by exact name or by a `*` pattern. |
+| `tools: +grep, -write` | Add and remove exact names in list order. Child Pi sessions start from their default selection. `pi --agent` starts from the current session's active tools. |
+| `tools:` or omitted | Keep the entry point's existing tool selection. |
+| `tools: read, -write` or `tools: +hc_*` | Reject the profile. Use names and patterns together, or modifiers exclusively. Modifiers require exact tool names. |
+
+`pi-subagents` passes the list to the child Pi's `--tools`. `pi-herdr-agents` does the same and maps the exact `subagent` name to `hc_run`, preserving any `+` or `-` prefix. For a non-empty list, Herdr also adds `hc_send` and `hc_agents` for reporting, using `+` entries in modifier mode. Pi applies its own tool availability and MCP exposure rules.
+
+`pi --agent` resolves names and patterns against registered tools, warns about entries with no match, and applies the result to the current session's active tool list. A non-empty allowlist with zero matches clears the active selection.
+
+### Skills
+
+Use `skills: review-*, tdd` to select matching skills or `skills: *` to select all discovered skills. `*` matches zero or more characters. Names and patterns are case-sensitive. An empty or omitted list leaves the profile prompt's skill selection empty. The shared prompt helper returns unmatched entries so each extension can report them. Pi renders the selected skill metadata in the system prompt.
+
+### Delegation
+
+`allowedAgents` restricts which named profiles a delegation tool can launch. Omit it or leave it empty to add no name restriction. The applicable delegation tool must also be available in the session.
+
+| Entry point | `allowedAgents` | `maxDepth` |
+| --- | --- | --- |
+| `pi-subagents` | Filters the named agents offered by the child `subagent` tool when the launcher can pass a non-empty list of matching names. | The child `subagent` tool is disabled when the child depth exceeds the profile limit. |
+| `pi-herdr-agents` | Intersects the profile list with any inherited list. When restricted, `hc_run` requires an allowed agent name. | Inherits the stricter of the profile limit and the parent limit. Exceeding it disables `hc_run` in the child. |
+| `pi --agent` | Configures the `subagent` tool when the `pi-subagents` extension is loaded. | The field is parsed. `custom-agent` does not set a depth limit for the current session. |
+
+The first delegated child starts at depth `1`. A child at depth `1` with `maxDepth: 0` cannot delegate further through its launcher. With `maxDepth: 1`, that child is still at the limit and may delegate if its tools and agent scope permit it. Each launch increments the depth. `pi-subagents` sets the new child's limit from the new profile, while Herdr also carries forward the inherited limit.
+
+### Prompt composition
+
+| `systemPrompt` | Base prompt | Project context | Profile body and tools |
+| --- | --- | --- | --- |
+| `append` | Keep Pi's base prompt | Keep | Append the Markdown body after any existing addendum. Pi renders its normal tool information. |
+| `replace` | Use the profile's custom preamble | Keep | Render the Markdown body with the visible runtime tool list and guidelines. |
+| `replace-all` | Use the profile's custom preamble | Omit | Render the same replacement prompt with the project context cleared. The child launchers also pass `--no-context-files`. |
+
+All modes apply the profile's `skills` selection. In replacement modes, put `<pi-subagents-runtime-tools />` in the body to place the tool list and guidelines at that point. By default, they follow the body. In `append` mode, the marker is removed.
 
 ## Extension integration
 
@@ -40,15 +104,11 @@ if (profile) {
 }
 ```
 
-Use `loadAgentFromPath(path, cwd)` for an explicit Markdown path, or `parseAgentProfile(content, path, source)` when the caller already has the contents. `loadAgentDefinitions` also accepts `agentDir`, `globalDir`, and `projectDir` overrides. By default it honors `PI_CODING_AGENT_DIR` for the user agent directory.
+Use `loadAgentFromPath(path, cwd)` for an explicit Markdown path, or `parseAgentProfile(content, path, source)` when the caller already has the contents. `loadAgentDefinitions` also accepts `agentDir`, `globalDir`, and `projectDir` overrides.
 
-- `append` adds the profile body after Pi's existing append prompt.
-- `replace` uses the profile body as Pi's custom preamble, injects visible tool descriptions and guidelines, and retains project context.
-- `replace-all` also clears project context when assembling the prompt. A child launcher can pass Pi's `--no-context-files` option to skip loading those files entirely.
+Call `selectAgentModel(profile, requestedModel, getAvailableModels)` to select or validate a model before activation. Child launchers can pass `profile.tools` to Pi's `--tools`. Current-session extensions can call `selectAgentTools(entries, available, active)` to resolve the declared selection and get unmatched entries. `selectAgentSkills` and `formatRuntimeTools` expose the skill matching and tool formatting independently.
 
-The optional `<pi-subagents-runtime-tools />` marker controls where the tool block appears in a replacement prompt. Pi renders the selected skills from the session's discovered skills. Patterns support `*`. A profile without `skills` supplies an empty skill list to the prompt. Callers can use `selectAgentSkills` to match a separate catalog or `formatRuntimeTools` to render the tool block independently.
-
-Call `selectAgentModel(profile, requestedModel, getAvailableModels)` before launch. It rejects requests outside the list and defaults to the first entry. If that entry is a wildcard, it selects the first available model that matches or reports a missing match. When neither the request nor the profile specifies a model, it returns `undefined` so Pi can choose its default. The caller activates the selected model and tools, enforces delegation rules, and decides how to run and debug the session. Apply the profile after configuring tools so the descriptions reflect the active set.
+The integrating extension sets the model, thinking level, and tools, and handles delegation and debug output. Apply the profile after configuring the tools so the rendered tool descriptions reflect the active selection.
 
 ## Development
 

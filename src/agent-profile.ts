@@ -125,6 +125,8 @@ export function parseAgentProfile(
     throw new Error(`invalid debug: ${debug}`);
   }
   const models = csv(fields.get('models'));
+  const tools = csv(fields.get('tools'));
+  validateToolList(tools);
   const skills = csv(fields.get('skills'));
   const allowedAgents = csv(fields.get('allowedAgents'));
 
@@ -133,7 +135,7 @@ export function parseAgentProfile(
     description: fields.get('description') || undefined,
     models: models.length ? models : undefined,
     thinking,
-    tools: csv(fields.get('tools')),
+    tools,
     skills: skills.length ? skills : undefined,
     allowedAgents: allowedAgents.length ? allowedAgents : undefined,
     maxDepth,
@@ -191,6 +193,58 @@ export function selectAgentModel(
   throw new Error(
     `No available models match default pattern "${first}" for agent "${profile.name}".`,
   );
+}
+
+function isToolModifier(entry: string): boolean {
+  return entry.startsWith('+') || entry.startsWith('-');
+}
+
+function validateToolList(entries: readonly string[]): void {
+  const modifiers = entries.filter(isToolModifier);
+  if (modifiers.length && modifiers.length !== entries.length) {
+    throw new Error('invalid tools: tool names cannot be mixed with +name or -name entries');
+  }
+  const pattern = modifiers.find((entry) => entry.includes('*'));
+  if (pattern) {
+    throw new Error(
+      `invalid tools: +name and -name entries take exact tool names, not patterns: ${pattern}`,
+    );
+  }
+}
+
+export function selectAgentTools(
+  entries: readonly string[],
+  available: readonly string[],
+  active: readonly string[],
+): { selected: string[]; missing: string[] } {
+  validateToolList(entries);
+  if (!entries.length) return { selected: [...active], missing: [] };
+
+  const missing = new Set<string>();
+  if (isToolModifier(entries[0])) {
+    const availableNames = new Set(available);
+    const selected = new Set(active);
+    for (const entry of entries) {
+      const name = entry.slice(1);
+      if (!availableNames.has(name)) {
+        missing.add(entry);
+      } else if (entry.startsWith('+')) {
+        selected.add(name);
+      } else {
+        selected.delete(name);
+      }
+    }
+    return { selected: [...selected], missing: [...missing] };
+  }
+
+  const selected = new Set<string>();
+  for (const entry of entries) {
+    const pattern = wildcardMatcher(entry);
+    const matches = available.filter((name) => pattern.test(name));
+    if (!matches.length) missing.add(entry);
+    for (const name of matches) selected.add(name);
+  }
+  return { selected: [...selected], missing: [...missing] };
 }
 
 export async function loadAgentFromPath(
