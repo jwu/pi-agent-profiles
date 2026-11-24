@@ -1,5 +1,5 @@
 import type { NormalizedBuildSystemPromptOptions } from '@earendil-works/pi-coding-agent';
-import type { AgentProfile } from './agent-profile.js';
+import { wildcardMatcher, type AgentProfile } from './agent-profile.js';
 
 const runtimeToolsMarker = '<pi-subagents-runtime-tools />';
 
@@ -29,14 +29,6 @@ export function selectAgentSkills<T extends { name: string }>(
     for (const skill of matches) selected.set(skill.name, skill);
   }
   return { selected: [...selected.values()], missing: [...missing] };
-}
-
-function wildcardMatcher(pattern: string): RegExp {
-  const expression = pattern
-    .split('*')
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('.*');
-  return new RegExp(`^${expression}$`);
 }
 
 type ToolPromptOptions = Pick<

@@ -2,6 +2,7 @@ export {
   loadAgentDefinitions,
   loadAgentFromPath,
   parseAgentProfile,
+  selectAgentModel,
   type AgentDefinitions,
   type AgentDefinitionWarning,
   type AgentProfile,

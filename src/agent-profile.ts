@@ -12,7 +12,7 @@ export type SystemPromptMode = (typeof promptModes)[number];
 export interface AgentProfile {
   name: string;
   description?: string;
-  model?: string;
+  models?: string[];
   thinking: ThinkingLevel;
   tools: string[];
   skills?: string[];
@@ -109,6 +109,9 @@ export function parseAgentProfile(
     );
   }
 
+  if (fields.has('model'))
+    throw new Error('The `model` field is no longer supported. Please use `models` instead.');
+
   const name = fields.get('name');
   if (!name) throw new Error('missing required field: name');
   const thinking = choice('thinking', fields.get('thinking'), thinkingLevels);
@@ -121,13 +124,14 @@ export function parseAgentProfile(
   if (debug !== undefined && debug !== 'true' && debug !== 'false') {
     throw new Error(`invalid debug: ${debug}`);
   }
+  const models = csv(fields.get('models'));
   const skills = csv(fields.get('skills'));
   const allowedAgents = csv(fields.get('allowedAgents'));
 
   return {
     name,
     description: fields.get('description') || undefined,
-    model: fields.get('model') || undefined,
+    models: models.length ? models : undefined,
     thinking,
     tools: csv(fields.get('tools')),
     skills: skills.length ? skills : undefined,
@@ -142,6 +146,51 @@ export function parseAgentProfile(
     source,
     filePath,
   };
+}
+
+export function wildcardMatcher(pattern: string): RegExp {
+  const expression = pattern
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${expression}$`);
+}
+
+export function selectAgentModel(
+  profile: Pick<AgentProfile, 'name' | 'models'> | undefined,
+  requestedModel?: string,
+  getAvailableModels?: () => readonly { provider: string; id: string }[],
+): string | undefined {
+  const requested = requestedModel?.trim() || undefined;
+  const allowed = profile?.models;
+  if (!profile || !allowed?.length) return requested;
+
+  if (requested) {
+    const modelId = requested.slice(requested.indexOf('/') + 1);
+    if (
+      !requested.includes('*') &&
+      allowed.some((pattern) => {
+        const matches = wildcardMatcher(pattern);
+        return matches.test(requested) || (!pattern.includes('/') && matches.test(modelId));
+      })
+    ) {
+      return requested;
+    }
+    throw new Error(
+      `Model "${requested}" is not allowed for agent "${profile.name}". Allowed models: ${allowed.join(', ')}.`,
+    );
+  }
+
+  const first = allowed[0];
+  if (!first.includes('*')) return first;
+  const matches = wildcardMatcher(first);
+  for (const { provider, id } of getAvailableModels?.() ?? []) {
+    const qualified = `${provider}/${id}`;
+    if (matches.test(qualified) || (!first.includes('/') && matches.test(id))) return qualified;
+  }
+  throw new Error(
+    `No available models match default pattern "${first}" for agent "${profile.name}".`,
+  );
 }
 
 export async function loadAgentFromPath(

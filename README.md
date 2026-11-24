@@ -12,6 +12,7 @@ name: reviewer
 description: Reviews code changes.
 tools: read, grep, find, ls
 skills: review-*, tdd
+models: anthropic/claude-sonnet-4-6, magpie/claude/*, deep-*
 systemPrompt: replace
 thinking: high
 ---
@@ -19,7 +20,9 @@ thinking: high
 Review the changes. Report actionable findings with file and line references.
 ```
 
-The scalar frontmatter format also accepts `model`, `allowedAgents`, `maxDepth`, and `debug`. Only `name` is required. `thinking` defaults to `off`, `maxDepth` to `10`, and `systemPrompt` to `append`.
+The scalar frontmatter format also accepts `allowedAgents`, `maxDepth`, and `debug`. Only `name` is required. `thinking` defaults to `off`, `maxDepth` to `10`, and `systemPrompt` to `append`.
+
+Use the comma-separated `models` field to allow model IDs and `*` patterns. A pattern such as `magpie/claude/*` matches a provider-qualified ID. A pattern such as `deep-*` can match the model ID alone. An omitted or empty list allows any model. Rename an existing `model` field to `models`. The loader warns and skips any profile that still contains `model`.
 
 ## Extension integration
 
@@ -45,7 +48,7 @@ Use `loadAgentFromPath(path, cwd)` for an explicit Markdown path, or `parseAgent
 
 The optional `<pi-subagents-runtime-tools />` marker controls where the tool block appears in a replacement prompt. Pi renders the selected skills from the session's discovered skills. Patterns support `*`. A profile without `skills` supplies an empty skill list to the prompt. Callers can use `selectAgentSkills` to match a separate catalog or `formatRuntimeTools` to render the tool block independently.
 
-The caller activates the model and tool selection, enforces delegation rules, and decides how to run and debug the session. Apply the profile after configuring tools so the descriptions reflect the active set.
+Call `selectAgentModel(profile, requestedModel, getAvailableModels)` before launch. It rejects requests outside the list and defaults to the first entry. If that entry is a wildcard, it selects the first available model that matches or reports a missing match. When neither the request nor the profile specifies a model, it returns `undefined` so Pi can choose its default. The caller activates the selected model and tools, enforces delegation rules, and decides how to run and debug the session. Apply the profile after configuring tools so the descriptions reflect the active set.
 
 ## Development
 

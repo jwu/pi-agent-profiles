@@ -8,6 +8,7 @@ import {
   loadAgentDefinitions,
   loadAgentFromPath,
   parseAgentProfile,
+  selectAgentModel,
   selectAgentSkills,
 } from '../src/index.js';
 
@@ -57,7 +58,7 @@ test('parses scalar frontmatter, bare wildcard lists, and existing markers', () 
       'description: "Reviews: correctness"',
       'tools: read, subagent',
       'skills: *, obsidian-*',
-      'model: test/model',
+      'models: test/model, magpie/claude/*, deep-*',
       'allowedAgents: scout, tester',
       'maxDepth: 0',
       'thinking: high',
@@ -71,7 +72,7 @@ test('parses scalar frontmatter, bare wildcard lists, and existing markers', () 
     description: 'Reviews: correctness',
     tools: ['read', 'subagent'],
     skills: ['*', 'obsidian-*'],
-    model: 'test/model',
+    models: ['test/model', 'magpie/claude/*', 'deep-*'],
     allowedAgents: ['scout', 'tester'],
     maxDepth: 0,
     thinking: 'high',
@@ -80,6 +81,46 @@ test('parses scalar frontmatter, bare wildcard lists, and existing markers', () 
     prompt: 'Body.\n\n',
     source: 'path',
   });
+});
+
+test('selects allowed models and uses the first configured entry by default', () => {
+  const profile = parseAgentProfile(
+    markdown('name: reviewer\nmodels: test/model, magpie/claude/*, deep-*'),
+    'review.md',
+  );
+  expect(selectAgentModel(profile)).toBe('test/model');
+  expect(selectAgentModel(profile, 'magpie/claude/sonnet')).toBe('magpie/claude/sonnet');
+  expect(selectAgentModel(profile, 'deep-flash')).toBe('deep-flash');
+  expect(selectAgentModel(profile, 'deepseek/deep-flash')).toBe('deepseek/deep-flash');
+  expect(() => selectAgentModel(profile, 'other/magpie/claude/sonnet')).toThrow('is not allowed');
+  expect(() => selectAgentModel(profile, 'other/model')).toThrow('is not allowed');
+});
+
+test('resolves a wildcard default against available models in catalog order', () => {
+  const profile = { name: 'reviewer', models: ['magpie/claude/*', 'test/model'] };
+  const available = () => [
+    { provider: 'test', id: 'model' },
+    { provider: 'magpie', id: 'claude/sonnet' },
+    { provider: 'magpie', id: 'claude/opus' },
+  ];
+  expect(selectAgentModel(profile, undefined, available)).toBe('magpie/claude/sonnet');
+  expect(() => selectAgentModel(profile, undefined, () => available().slice(0, 1))).toThrow(
+    'No available models match default pattern "magpie/claude/*"',
+  );
+});
+
+test('accepts any requested model with an omitted or empty list', () => {
+  for (const fields of ['name: reviewer', 'name: reviewer\nmodels: ']) {
+    const unrestricted = parseAgentProfile(markdown(fields), 'review.md');
+    expect(selectAgentModel(unrestricted)).toBeUndefined();
+    expect(selectAgentModel(unrestricted, 'other/model')).toBe('other/model');
+  }
+});
+
+test('rejects the old model field even when models is also configured', () => {
+  expect(() =>
+    parseAgentProfile(markdown('name: reviewer\nmodel:\nmodels: new/model'), 'review.md'),
+  ).toThrow('Please use `models` instead.');
 });
 
 test('loads directories with project overrides and reports invalid definitions', async () => {
@@ -92,19 +133,27 @@ test('loads directories with project overrides and reports invalid definitions',
       mkdir(projectDir, { recursive: true }),
     ]);
     const invalidPath = join(projectDir, 'invalid.md');
+    const legacyPath = join(projectDir, 'legacy.md');
     await Promise.all([
       writeFile(join(globalDir, 'review.md'), markdown('name: reviewer', 'Global.')),
       writeFile(join(globalDir, 'solo.md'), markdown('name: solo')),
       writeFile(join(projectDir, 'a.md'), markdown('name: reviewer', 'Project.')),
       writeFile(join(projectDir, 'b.md'), markdown('name: reviewer', 'Duplicate.')),
       writeFile(invalidPath, markdown('name: invalid\nsystemPrompt: unknown')),
+      writeFile(legacyPath, markdown('name: legacy\nmodel: test/model')),
     ]);
     const { agents, warnings } = await loadAgentDefinitions({ cwd, agentDir: join(cwd, 'user') });
     expect(agents).toMatchObject([
       { name: 'reviewer', prompt: 'Project.', source: 'project', thinking: 'off', maxDepth: 10 },
       { name: 'solo', source: 'global', systemPromptMode: 'append' },
     ]);
-    expect(warnings).toEqual([{ filePath: invalidPath, message: 'invalid systemPrompt: unknown' }]);
+    expect(warnings).toEqual([
+      { filePath: invalidPath, message: 'invalid systemPrompt: unknown' },
+      {
+        filePath: legacyPath,
+        message: 'The `model` field is no longer supported. Please use `models` instead.',
+      },
+    ]);
     expect(await loadAgentFromPath('.pi/agents/a.md', cwd)).toMatchObject({
       name: 'reviewer',
       source: 'path',
