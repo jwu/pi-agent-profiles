@@ -160,10 +160,7 @@ export function parseAgentProfile(
     maxDepth,
     debug: debug === 'true',
     systemPromptMode,
-    prompt: normalized
-      .slice(match[0].length)
-      .replace(/^\n+/, '')
-      .replaceAll('<pi-runtime-tools />', ''),
+    prompt: normalized.slice(match[0].length).replace(/^\n+/, ''),
     source,
     filePath,
   };

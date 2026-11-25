@@ -72,7 +72,7 @@ Use `skills: review-*, tdd` to select matching skills or `skills: *` to select a
 
 | Entry point | `allowedAgents` | `maxDepth` |
 | --- | --- | --- |
-| `pi-subagents` | Filters the named agents offered by the child `subagent` tool when the launcher can pass a non-empty list of matching names. | Applies the depth rule below. A child past its limit gets no `subagent` tool. |
+| `pi-subagents` | Filters the named agents offered by the child `subagent` tool to the names in both the profile's list and the launcher's own. When no name is left, the child cannot delegate to any agent. | Applies the depth rule below. A child past its limit gets no `subagent` tool. |
 | `pi-herdr-agents` | Intersects the profile list with any inherited list. When restricted, `hc_subagent` requires an allowed agent name. | Applies the depth rule below. A child past its limit gets none of the five delegation tools. |
 | `pi --agent` | Emits `pi-subagents:configure`, which restricts `subagent` from `pi-subagents` and `hc_subagent` from `pi-herdr-agents` when they are loaded. | Emits the profile's `maxDepth` on the same event, so both extensions count it from the current session. With `maxDepth: 0`, `custom-agent` also removes the delegation tools from the session. |
 

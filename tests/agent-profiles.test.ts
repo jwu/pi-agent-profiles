@@ -57,7 +57,7 @@ function promptOptions(): NormalizedBuildSystemPromptOptions {
   };
 }
 
-test('parses scalar frontmatter, bare wildcard lists, and existing markers', () => {
+test('parses scalar frontmatter and bare wildcard lists', () => {
   const document = markdown(
     [
       'name: reviewer',
@@ -71,7 +71,7 @@ test('parses scalar frontmatter, bare wildcard lists, and existing markers', () 
       'systemPrompt: replace-all',
       'debug: true',
     ].join('\n'),
-    'Body.\n<pi-runtime-tools />\n',
+    'Body.\n',
   ).replaceAll('\n', '\r\n');
   expect(parseAgentProfile(`\uFEFF${document}`, 'review.md')).toMatchObject({
     name: 'reviewer',
@@ -84,7 +84,7 @@ test('parses scalar frontmatter, bare wildcard lists, and existing markers', () 
     thinking: 'high',
     systemPromptMode: 'replace-all',
     debug: true,
-    prompt: 'Body.\n\n',
+    prompt: 'Body.\n',
     source: 'path',
   });
 });

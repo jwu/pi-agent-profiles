@@ -1,6 +1,6 @@
 {
   "name": "@johnnywu/pi-agent-profiles",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Shared Markdown agent profiles and system prompt composition for Pi",
   "repository": {
     "type": "git",
