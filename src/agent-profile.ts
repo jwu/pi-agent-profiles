@@ -4,6 +4,18 @@ import { join, resolve } from 'node:path';
 
 const thinkingLevels = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 const promptModes = ['append', 'replace', 'replace-all'] as const;
+const fieldNames = [
+  'name',
+  'description',
+  'models',
+  'thinking',
+  'tools',
+  'skills',
+  'allowedAgents',
+  'maxDepth',
+  'systemPrompt',
+  'debug',
+];
 
 export type AgentSource = 'global' | 'project' | 'path';
 export type ThinkingLevel = (typeof thinkingLevels)[number];
@@ -111,6 +123,13 @@ export function parseAgentProfile(
 
   if (fields.has('model'))
     throw new Error('The `model` field is no longer supported. Please use `models` instead.');
+  // A misspelled field would otherwise be ignored, which silently lifts a limit such as maxDepth.
+  const unknown = [...fields.keys()].filter((key) => !fieldNames.includes(key));
+  if (unknown.length) {
+    throw new Error(
+      `unknown field${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}. Supported fields: ${fieldNames.join(', ')}.`,
+    );
+  }
 
   const name = fields.get('name');
   if (!name) throw new Error('missing required field: name');

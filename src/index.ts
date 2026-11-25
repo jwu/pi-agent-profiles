@@ -16,6 +16,13 @@ export {
   type ThinkingLevel,
 } from './agent-profile.js';
 export {
+  delegationDepthLimit,
+  delegationScopeEvent,
+  narrowAllowedAgents,
+  parseDelegationScope,
+  type DelegationScope,
+} from './delegation.js';
+export {
   applyAgentProfile,
   formatRuntimeTools,
   selectAgentSkills,

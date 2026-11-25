@@ -5,10 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   applyAgentProfile,
+  delegationDepthLimit,
+  delegationScopeEvent,
   herdrAgentTools,
   loadAgentDefinitions,
   loadAgentFromPath,
+  narrowAllowedAgents,
   parseAgentProfile,
+  parseDelegationScope,
   selectAgentModel,
   selectAgentTools,
   selectAgentSkills,
@@ -160,6 +164,79 @@ test('rejects invalid tools syntax when loading a profile', () => {
   expect(parse('+grep, -write').tools).toEqual(['+grep', '-write']);
   expect(() => parse('read, -write')).toThrow('cannot be mixed');
   expect(() => parse('+hc_*')).toThrow('entries take exact tool names');
+});
+
+test('rejects unknown fields so a misspelled limit is not ignored', () => {
+  const parse = (fields: string) =>
+    parseAgentProfile(markdown(`name: reviewer\n${fields}`), 'review.md');
+  expect(() => parse('maxdepth: 0')).toThrow('unknown field: maxdepth. Supported fields: name,');
+  expect(() => parse('allowedagents: scout\ntool: read')).toThrow(
+    'unknown fields: allowedagents, tool.',
+  );
+  expect(parse('maxDepth: 0\nallowedAgents: scout')).toMatchObject({
+    maxDepth: 0,
+    allowedAgents: ['scout'],
+  });
+});
+
+test('counts maxDepth from the agent and passes the tightest limit down the chain', () => {
+  const canDelegate = (depth: number, limit: number | undefined) =>
+    limit === undefined || depth <= limit;
+
+  // A lead at depth 0: maxDepth 0 forbids delegation, and maxDepth 1 allows one level.
+  expect(canDelegate(0, delegationDepthLimit(0, 0))).toBe(false);
+  const lead = delegationDepthLimit(0, 1);
+  expect(canDelegate(0, lead)).toBe(true);
+  expect(canDelegate(1, delegationDepthLimit(1, 10, lead))).toBe(false);
+
+  // a, b, c, and d each declare maxDepth: 3, with a at depth 1. The budget of a runs out at d.
+  const limits: number[] = [];
+  for (let depth = 1; depth <= 4; depth++) {
+    limits.push(delegationDepthLimit(depth, 3, limits.at(-1))!);
+  }
+  expect(limits).toEqual([3, 3, 3, 3]);
+  expect(limits.map((limit, index) => canDelegate(index + 1, limit))).toEqual([
+    true,
+    true,
+    true,
+    false,
+  ]);
+
+  // The same maxDepth: 1 profile delegates one level wherever it runs.
+  expect(delegationDepthLimit(2, 1, 10)).toBe(2);
+  // A descendant can tighten the inherited limit, and a session without a profile keeps it.
+  expect(delegationDepthLimit(3, 0, 5)).toBe(2);
+  expect(delegationDepthLimit(3, undefined, 5)).toBe(5);
+  expect(delegationDepthLimit(3, undefined)).toBeUndefined();
+});
+
+test('narrows allowed agents to the inherited list', () => {
+  expect(narrowAllowedAgents(['worker', 'scout', 'worker'], ['scout', 'worker'])).toEqual([
+    'worker',
+    'scout',
+  ]);
+  expect(narrowAllowedAgents(['scout'], ['worker'])).toEqual([]);
+  expect(narrowAllowedAgents(['scout'], undefined)).toEqual(['scout']);
+  expect(narrowAllowedAgents(undefined, ['worker'])).toEqual(['worker']);
+  expect(narrowAllowedAgents(undefined, undefined)).toBeUndefined();
+});
+
+test('reads the delegation scope event payload and drops malformed fields', () => {
+  expect(delegationScopeEvent).toBe('pi-subagents:configure');
+  expect(parseDelegationScope({ allowedAgents: ['scout', 1], maxDepth: 2 })).toEqual({
+    allowedAgents: ['scout'],
+    maxDepth: 2,
+  });
+  expect(parseDelegationScope({ allowedAgents: [], maxDepth: 0 })).toEqual({
+    allowedAgents: [],
+    maxDepth: 0,
+  });
+  for (const payload of [undefined, null, 'scout', { allowedAgents: 'scout', maxDepth: -1 }]) {
+    expect(parseDelegationScope(payload)).toEqual({
+      allowedAgents: undefined,
+      maxDepth: undefined,
+    });
+  }
 });
 
 test('loads directories with project overrides and reports invalid definitions', async () => {

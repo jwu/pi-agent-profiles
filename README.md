@@ -25,7 +25,7 @@ Review the changes. Report actionable findings with file and line references.
 <pi-subagents-runtime-tools />
 ```
 
-Start the file with a `---` block containing one `key: value` entry per line. The parser trims surrounding whitespace and strips quotes from the edges of a value. Blank lines and full-line `#` comments are ignored inside the block. Write lists as comma-separated values on one line (for example, `tools: read, grep`). The parser trims each item and skips empty items. Inline comments, YAML sequences, and multiline values have no special syntax. Field names are case-sensitive. The Markdown after the closing `---` is the agent prompt.
+Start the file with a `---` block containing one `key: value` entry per line. The parser trims surrounding whitespace and strips quotes from the edges of a value. Blank lines and full-line `#` comments are ignored inside the block. Write lists as comma-separated values on one line (for example, `tools: read, grep`). The parser trims each item and skips empty items. Inline comments, YAML sequences, and multiline values have no special syntax. Field names are case-sensitive. A field name outside the reference below is an error, and the loader skips the definition with a warning, so a misspelled `maxDepth` or `allowedAgents` cannot silently lift a limit. The Markdown after the closing `---` is the agent prompt.
 
 ## Field reference
 
@@ -38,7 +38,7 @@ Start the file with a `---` block containing one `key: value` entry per line. Th
 | `tools` | Entry point's existing tool selection | Comma-separated tool names and `*` patterns, or a list of `+name` and `-name` entries. See [Tool selection](#tool-selection). |
 | `skills` | No skills in the profile prompt | Comma-separated skill names or `*` patterns such as `review-*`. Matches the skill's declared `name` against the entry point's discovered skills. |
 | `allowedAgents` | No additional name restriction | Comma-separated exact profile names for delegation, such as `scout, test-writer`. See [Delegation](#delegation). |
-| `maxDepth` | `10` | Non-negative safe integer for the depth of delegated sessions. See [Delegation](#delegation). |
+| `maxDepth` | `10` | Non-negative safe integer for the levels of delegated sessions allowed below the agent. See [Delegation](#delegation). |
 | `systemPrompt` | `append` | One of `append`, `replace`, or `replace-all`. See [Prompt composition](#prompt-composition). |
 | `debug` | `false` | `true` or `false` in lowercase. With `true`, the launchers write `debug-system-prompt.md` in the session working directory when a turn starts, overwriting the previous copy. |
 
@@ -72,11 +72,13 @@ Use `skills: review-*, tdd` to select matching skills or `skills: *` to select a
 
 | Entry point | `allowedAgents` | `maxDepth` |
 | --- | --- | --- |
-| `pi-subagents` | Filters the named agents offered by the child `subagent` tool when the launcher can pass a non-empty list of matching names. | The child `subagent` tool is disabled when the child depth exceeds the profile limit. |
-| `pi-herdr-agents` | Intersects the profile list with any inherited list. When restricted, `hc_subagent` requires an allowed agent name. | Inherits the stricter of the profile limit and the parent limit. Exceeding it disables `hc_subagent` in the child. |
-| `pi --agent` | Emits `pi-subagents:configure`, which restricts `subagent` from `pi-subagents` and `hc_subagent` from `pi-herdr-agents` when they are loaded. | The field is parsed. `custom-agent` does not set a depth limit for the current session. |
+| `pi-subagents` | Filters the named agents offered by the child `subagent` tool when the launcher can pass a non-empty list of matching names. | Applies the depth rule below. A child past its limit gets no `subagent` tool. |
+| `pi-herdr-agents` | Intersects the profile list with any inherited list. When restricted, `hc_subagent` requires an allowed agent name. | Applies the depth rule below. A child past its limit gets none of the five delegation tools. |
+| `pi --agent` | Emits `pi-subagents:configure`, which restricts `subagent` from `pi-subagents` and `hc_subagent` from `pi-herdr-agents` when they are loaded. | Emits the profile's `maxDepth` on the same event, so both extensions count it from the current session. With `maxDepth: 0`, `custom-agent` also removes the delegation tools from the session. |
 
-The first delegated child starts at depth `1`. A child at depth `1` with `maxDepth: 0` cannot delegate further through its launcher. With `maxDepth: 1`, that child is still at the limit and may delegate if its tools and agent scope permit it. Each launch increments the depth. `pi-subagents` sets the new child's limit from the new profile, while Herdr also carries forward the inherited limit.
+`maxDepth` is the number of levels of delegated sessions allowed below the agent, counted from the agent's own level wherever it runs. With `maxDepth: 0` the agent cannot delegate. With `maxDepth: 1` it can launch children, and those children cannot delegate further.
+
+The limit passes down the chain, and a descendant can tighten it but not widen it. If `a`, `b`, and `c` each declare `maxDepth: 3`, and `a` launches `b`, `b` launches `c`, and `c` launches `d`, then `d` cannot delegate: it is already three levels below `a`. `pi-subagents` and `pi-herdr-agents` apply the same rule, each to its own chain of children.
 
 ### Prompt composition
 
@@ -107,6 +109,8 @@ if (profile) {
 Use `loadAgentFromPath(path, cwd)` for an explicit Markdown path, or `parseAgentProfile(content, path, source)` when the caller already has the contents. `loadAgentDefinitions` also accepts `agentDir`, `globalDir`, and `projectDir` overrides.
 
 Call `selectAgentModel(profile, requestedModel, getAvailableModels)` to select or validate a model before activation. Child launchers can pass `profile.tools` to Pi's `--tools`. Current-session extensions can call `selectAgentTools(entries, available, active)` to resolve the declared selection and get unmatched entries. `selectAgentSkills` and `formatRuntimeTools` expose the skill matching and tool formatting independently.
+
+Delegation extensions share one scope contract. A session that runs as an agent emits `delegationScopeEvent` on `pi.events` with a `DelegationScope` payload (`{ allowedAgents?, maxDepth? }`), and listeners read it with `parseDelegationScope(payload)`. `delegationDepthLimit(depth, maxDepth, inherited)` returns the deepest level that may still delegate, and an agent delegates while its depth is at most that limit. `narrowAllowedAgents(names, inherited)` limits a profile's agents to the inherited list.
 
 The integrating extension sets the model, thinking level, and tools, and handles delegation and debug output. Apply the profile after configuring the tools so the rendered tool descriptions reflect the active selection.
 
