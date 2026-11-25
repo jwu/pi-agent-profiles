@@ -247,6 +247,40 @@ export function selectAgentTools(
   return { selected: [...selected], missing: [...missing] };
 }
 
+/** Tools a Herdr agent uses to delegate to and manage its children. */
+export const herdrDelegationTools = [
+  'hc_subagent',
+  'hc_renew',
+  'hc_read',
+  'hc_stop',
+  'hc_rm',
+] as const;
+/** Tools every Herdr agent keeps for reporting and coordination. */
+export const herdrReportingTools = ['hc_send', 'hc_agents'] as const;
+
+/**
+ * Translate a profile's tool list for a session that runs in Herdr Core. Each exact `subagent`
+ * entry selects the Herdr delegation tools with the same `+` or `-` prefix, and keeps the
+ * `subagent` entry itself when `keepSubagent` is set. A non-empty list also selects the reporting
+ * tools, as `+` entries in modifier mode. An empty list stays empty.
+ */
+export function herdrAgentTools(
+  entries: readonly string[],
+  options: { keepSubagent?: boolean } = {},
+): string[] {
+  validateToolList(entries);
+  if (!entries.length) return [];
+  const tools = entries.flatMap((entry) => {
+    const prefix = /^([+-]?)subagent$/.exec(entry)?.[1];
+    if (prefix === undefined) return [entry];
+    const delegation = herdrDelegationTools.map((tool) => `${prefix}${tool}`);
+    return options.keepSubagent ? [entry, ...delegation] : delegation;
+  });
+  const modifiers = isToolModifier(entries[0]);
+  for (const tool of herdrReportingTools) tools.push(modifiers ? `+${tool}` : tool);
+  return tools;
+}
+
 export async function loadAgentFromPath(
   selector: string,
   cwd = process.cwd(),

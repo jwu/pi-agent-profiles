@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   applyAgentProfile,
+  herdrAgentTools,
   loadAgentDefinitions,
   loadAgentFromPath,
   parseAgentProfile,
@@ -125,9 +126,9 @@ test('rejects the old model field even when models is also configured', () => {
 });
 
 test('selects exact and wildcard tools, reporting entries with no matches', () => {
-  const available = ['read', 'write', 'hc_run', 'hc_send'];
+  const available = ['read', 'write', 'hc_subagent', 'hc_send'];
   expect(selectAgentTools(['read', 'hc_*', 'read', 'missing*'], available, ['write'])).toEqual({
-    selected: ['read', 'hc_run', 'hc_send'],
+    selected: ['read', 'hc_subagent', 'hc_send'],
     missing: ['missing*'],
   });
   expect(selectAgentTools(['missing*'], available, ['write'])).toEqual({
@@ -249,4 +250,35 @@ test('replacement modes inject runtime guidance and handle project context', () 
     expect(options.contextFiles).toHaveLength(mode === 'replace' ? 1 : 0);
     expect(options.skills).toEqual([]);
   }
+});
+
+test('maps subagent to the Herdr delegation tools and adds the reporting tools', () => {
+  const delegation = ['hc_subagent', 'hc_renew', 'hc_read', 'hc_stop', 'hc_rm'];
+  expect(herdrAgentTools([])).toEqual([]);
+  expect(herdrAgentTools(['read', 'subagent'])).toEqual([
+    'read',
+    ...delegation,
+    'hc_send',
+    'hc_agents',
+  ]);
+  expect(herdrAgentTools(['read', 'subagent'], { keepSubagent: true })).toEqual([
+    'read',
+    'subagent',
+    ...delegation,
+    'hc_send',
+    'hc_agents',
+  ]);
+  expect(herdrAgentTools(['-subagent', '+grep'])).toEqual([
+    ...delegation.map((tool) => `-${tool}`),
+    '+grep',
+    '+hc_send',
+    '+hc_agents',
+  ]);
+  expect(herdrAgentTools(['read', 'subagent*'])).toEqual([
+    'read',
+    'subagent*',
+    'hc_send',
+    'hc_agents',
+  ]);
+  expect(() => herdrAgentTools(['read', '-write'])).toThrow('cannot be mixed');
 });

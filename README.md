@@ -45,7 +45,7 @@ Start the file with a `---` block containing one `key: value` entry per line. Th
 ### Model selection
 
 - `models: anthropic/claude-sonnet-4-6, magpie/claude/*, deep-*` allows three kinds of entries. A provider-qualified entry matches the full selection. An unqualified entry such as `deep-*` also matches the model ID portion of a qualified selection.
-- `subagent` and `hc_run` accept an optional `model` argument. A selection outside a configured list fails before launch. Leave it out to use the first `models` entry. If that entry is a pattern, the launcher takes the first matching model in Pi's available catalog. A pattern with no available match produces an error even if later entries could match.
+- `subagent` and `hc_subagent` accept an optional `model` argument. A selection outside a configured list fails before launch. Leave it out to use the first `models` entry. If that entry is a pattern, the launcher takes the first matching model in Pi's available catalog. A pattern with no available match produces an error even if later entries could match.
 - `pi --agent` applies the first entry to the current session. If model selection or activation fails, it warns and keeps the current model.
 - An omitted or empty `models` list allows any caller selection. With no explicit selection, Pi keeps its normal model selection. Rename old `model:` fields to `models:`. A profile that still contains `model:` is rejected with a migration message.
 
@@ -58,9 +58,9 @@ Start the file with a `---` block containing one `key: value` entry per line. Th
 | `tools:` or omitted | Keep the entry point's existing tool selection. |
 | `tools: read, -write` or `tools: +hc_*` | Reject the profile. Use names and patterns together, or modifiers exclusively. Modifiers require exact tool names. |
 
-`pi-subagents` passes the list to the child Pi's `--tools`. `pi-herdr-agents` does the same and maps the exact `subagent` name to `hc_run`, preserving any `+` or `-` prefix. For a non-empty list, Herdr also adds `hc_send` and `hc_agents` for reporting, using `+` entries in modifier mode. Pi applies its own tool availability and MCP exposure rules.
+`pi-subagents` passes the list to the child Pi's `--tools`. `pi-herdr-agents` passes the result of `herdrAgentTools()`: each exact `subagent` entry becomes the Herdr delegation tools `hc_subagent`, `hc_renew`, `hc_read`, `hc_stop`, and `hc_rm`, keeping any `+` or `-` prefix. A non-empty list also gets `hc_send` and `hc_agents` for reporting, as `+` entries in modifier mode. Pi applies its own tool availability and MCP exposure rules.
 
-`pi --agent` resolves names and patterns against registered tools, warns about entries with no match, and applies the result to the current session's active tool list. A non-empty allowlist with zero matches clears the active selection.
+`pi --agent` resolves names and patterns against registered tools. When `hc_subagent` is registered, it first applies `herdrAgentTools()` and keeps `subagent`, so a Herdr lead gets both delegation tools, warns about entries with no match, and applies the result to the current session's active tool list. A non-empty allowlist with zero matches clears the active selection.
 
 ### Skills
 
@@ -73,8 +73,8 @@ Use `skills: review-*, tdd` to select matching skills or `skills: *` to select a
 | Entry point | `allowedAgents` | `maxDepth` |
 | --- | --- | --- |
 | `pi-subagents` | Filters the named agents offered by the child `subagent` tool when the launcher can pass a non-empty list of matching names. | The child `subagent` tool is disabled when the child depth exceeds the profile limit. |
-| `pi-herdr-agents` | Intersects the profile list with any inherited list. When restricted, `hc_run` requires an allowed agent name. | Inherits the stricter of the profile limit and the parent limit. Exceeding it disables `hc_run` in the child. |
-| `pi --agent` | Configures the `subagent` tool when the `pi-subagents` extension is loaded. | The field is parsed. `custom-agent` does not set a depth limit for the current session. |
+| `pi-herdr-agents` | Intersects the profile list with any inherited list. When restricted, `hc_subagent` requires an allowed agent name. | Inherits the stricter of the profile limit and the parent limit. Exceeding it disables `hc_subagent` in the child. |
+| `pi --agent` | Emits `pi-subagents:configure`, which restricts `subagent` from `pi-subagents` and `hc_subagent` from `pi-herdr-agents` when they are loaded. | The field is parsed. `custom-agent` does not set a depth limit for the current session. |
 
 The first delegated child starts at depth `1`. A child at depth `1` with `maxDepth: 0` cannot delegate further through its launcher. With `maxDepth: 1`, that child is still at the limit and may delegate if its tools and agent scope permit it. Each launch increments the depth. `pi-subagents` sets the new child's limit from the new profile, while Herdr also carries forward the inherited limit.
 
